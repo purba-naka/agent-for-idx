@@ -1,0 +1,6 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+idx_agent.sqlite3
+.idx_test_output/

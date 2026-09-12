@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+*.sqlite3
+hasil_idx*/
+tmp_*
+tmp_api_test/
+.dockerignore
+Dockerfile
