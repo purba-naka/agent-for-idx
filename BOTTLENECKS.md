@@ -152,7 +152,7 @@ dicatat di `requirements.txt`.
 
 ---
 
-## 6. Tidak ada pembatasan laju ke Telegram
+## 6. Tidak ada pembatasan laju ke Telegram *(sebagian selesai)*
 
 **Berkas:** `app/telegram.py` (`send_telegram`)
 
@@ -163,6 +163,15 @@ sebagian akan ditolak dan berakhir `failed` -- lalu terkena masalah nomor 2.
 
 **Perbaikan:** hormati `parameters.retry_after` dari respons Telegram, plus
 jeda antar-pesan.
+
+Terpasang 13 Sep: `429`, `5xx`, dan error jaringan dicoba hingga tiga kali.
+`parameters.retry_after` dari body JSON Telegram dihormati; header
+`Retry-After` menjadi fallback. Error 4xx permanen tetap langsung gagal dan
+masuk reprocess `failed`.
+
+Belum ada jeda global antar-pesan. Saat ini risiko limit hanya muncul bila
+lebih dari ~20 berita lolos triage dalam satu menit; prioritas rendah selama
+ambang triage tetap 3.
 
 ---
 
@@ -452,5 +461,5 @@ berikutnya dapat menambah retry dan reprocess lewat seam yang teruji.
    multi-lampiran sudah ada; heuristik memilih dokumen paling material belum.
 2. **D6 + operasional 8, 9 -- bersih-bersih.** Putuskan nasib
    `WebhookNotifier`, lalu hapus atau arsipkan script root yang usang.
-3. **Operasional 6 -- rate limit Telegram.** Penting bila triage atau retry
-   menghasilkan banyak pesan dalam satu siklus.
+3. **Operasional 6 -- jeda global Telegram.** Tambahkan hanya bila volume
+   notifikasi nyata mendekati rate limit.
