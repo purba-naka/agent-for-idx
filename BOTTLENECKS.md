@@ -14,7 +14,7 @@ desain** (bentuk kode). Urutan dalam tiap bagian: dampak tertinggi di atas.
 
 # Bagian I -- Masalah Operasional
 
-## 1. Berita bisa hilang permanen saat poll gagal
+## 1. Berita bisa hilang permanen saat poll gagal *(sebagian selesai)*
 
 **Berkas:** `app/idx_client.py:84`, `app/main.py` (`poll_idx_safe`)
 
@@ -31,6 +31,16 @@ tepat saat poll gagal dan menit-menit berikutnya ikut gagal sampai lewat 10
 menit, pengumuman itu **tidak pernah masuk** jendela dan hilang selamanya.
 
 **Perbaikan:** retry 3-5x, backoff eksponensial, khusus status transien.
+
+Terpasang 13 Sep: `IDXClient` mengulang maksimal empat kali pada `429`, `500`,
+`502`, `503`, `504`, serta error jaringan `curl_cffi`. Backoff: 1, 2, 4 detik;
+header `Retry-After` dihormati bila IDX mengirimkannya. `403` tidak diulang,
+karena itu masalah autentikasi/fingerprint Cloudflare, bukan transien.
+
+Tiga kasus diuji tanpa request IDX: `503 -> 200`, `429` dengan `Retry-After`,
+dan `403` tanpa pengulangan. Risiko hilang tetap ada bila IDX gagal terus selama
+semua empat percobaan dan seluruh jendela lookback; itu ditutup oleh item 2
+(reprocess `failed`), yang belum dikerjakan.
 
 ---
 
@@ -425,11 +435,9 @@ berikutnya dapat menambah retry dan reprocess lewat seam yang teruji.
 
 ## Urutan kerja yang disarankan
 
-1. **Operasional 1 -- retry 503.** Satu-satunya masalah yang menyebabkan
-   kehilangan data permanen.
-2. **Operasional 2 -- proses ulang `failed`.** Jaring pengaman untuk sisa
-   kegagalan.
-3. **Operasional 5 -- pemilihan lampiran + anggaran karakter.** Menaikkan
+1. **Operasional 2 -- proses ulang `failed`.** Jaring pengaman untuk sisa
+   kegagalan poll, LLM, atau Telegram.
+2. **Operasional 5 -- pemilihan lampiran + anggaran karakter.** Menaikkan
    kualitas triage, bukan keandalan.
-4. **D6 + operasional 8, 9 -- bersih-bersih.** `WebhookNotifier` dan script
+3. **D6 + operasional 8, 9 -- bersih-bersih.** `WebhookNotifier` dan script
    root.
