@@ -25,7 +25,7 @@ def extract_primary_pdf(disclosure: Disclosure) -> str:
     urls = [
         item["FullSavePath"]
         for item in disclosure.attachments
-        if item.get("FullSavePath")
+        if item.get("FullSavePath", "").lower().endswith(".pdf")
     ][:MAX_ATTACHMENTS]
     if not urls:
         return ""
