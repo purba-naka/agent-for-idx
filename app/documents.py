@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import logging
 
-import requests
+from curl_cffi.requests import Session
 from pypdf import PdfReader
 
 from .idx_client import HEADERS
@@ -42,7 +42,14 @@ def extract_primary_pdf(disclosure: Disclosure) -> str:
 
 
 def _download_and_parse(url: str) -> str:
-    response = requests.get(url, headers=HEADERS, timeout=60)
+    """Unduh lampiran lalu ambil teksnya.
+
+    curl_cffi, bukan requests: StaticData IDX berada di balik Cloudflare yang
+    sama dengan API-nya, dan menolak klien Python biasa dengan 403 + halaman
+    HTML. impersonate="chrome" meniru TLS fingerprint browser.
+    """
+    with Session(impersonate="chrome", headers=HEADERS, timeout=60) as session:
+        response = session.get(url)
     response.raise_for_status()
     content_type = response.headers.get("Content-Type", "").lower()
     if "pdf" not in content_type and not response.content.startswith(b"%PDF-"):
