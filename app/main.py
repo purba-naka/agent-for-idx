@@ -107,8 +107,19 @@ async def process(disclosure: Disclosure, notify: bool = True) -> str:
     else:
         try:
             result = await graph.ainvoke({"disclosure": disclosure})
+            penilaian = result.get("penilaian")
             if not result.get("relevant"):
-                repository.mark_skipped(disclosure.id, "Tidak sesuai filter")
+                repository.mark_skipped(disclosure.id, "Tidak sesuai filter kata kunci")
+                statuses.append("agent_skipped")
+            elif not result.get("telegram_message"):
+                # Lolos filter tapi dihentikan triage: simpan alasannya agar
+                # ambang skor bisa disetel berdasarkan data, bukan tebakan.
+                alasan = (
+                    f"Triage skor {penilaian.skor}/5 ({penilaian.kategori}): {penilaian.alasan}"
+                    if penilaian
+                    else "Dihentikan sebelum peringkasan"
+                )
+                repository.mark_skipped(disclosure.id, alasan)
                 statuses.append("agent_skipped")
             else:
                 repository.mark_processed(

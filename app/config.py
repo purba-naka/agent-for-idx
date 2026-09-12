@@ -33,6 +33,22 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # --- Kurasi oleh LLM (node triage) ---
+    # Profil minat Anda; dipakai LLM untuk menilai apakah suatu pengumuman layak
+    # dikirim. Tulis bebas dalam Bahasa Indonesia, sespesifik mungkin.
+    agent_profile: str = (
+        "Investor ritel jangka menengah di pasar saham Indonesia. Fokus pada aksi "
+        "korporasi material: dividen, buyback, right issue, akuisisi, merger, stock "
+        "split. Juga perubahan kepemilikan signifikan, kinerja keuangan kuartalan, "
+        "serta sanksi dan suspensi dari bursa atau regulator. Abaikan laporan "
+        "administratif rutin seperti registrasi pemegang efek atau perubahan alamat."
+    )
+    # Skor materialitas 1-5 dari triage. Di bawah ambang ini, pengumuman tidak
+    # diringkas dan tidak dikirim. 3 = longgar, 4 = ketat.
+    agent_min_importance: int = 3
+    # Matikan untuk kembali ke filter kata kunci saja (hemat satu panggilan LLM).
+    agent_llm_triage: bool = True
+
     # --- Secret endpoint inbound: /webhook/idx, /trigger, /stats, /ws/idx ---
     idx_webhook_secret: str = ""
 
