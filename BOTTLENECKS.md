@@ -139,8 +139,13 @@ Sebaran skor triage tidak berubah, tetapi dasarnya berubah: alasan untuk KDTN
 berpindah dari "tanpa data pihak, jumlah" menjadi "menjual 2,3 juta saham (0,19
 poin persentase)".
 
-Sisa yang belum: pemilihan lampiran dan `MAX_DOCUMENT_CHARS` (bagian utama di
-atas). Satu dokumen sudah menyentuh cap 12.000 karakter.
+Sisa yang belum: pemilihan lampiran berdasarkan nama/ukuran. Satu dokumen sudah
+menyentuh cap 12.000 karakter.
+
+Terpasang 13 Sep: maksimal tiga lampiran PDF dibaca berurutan. Teks diberi
+penanda `[Lampiran N]` agar LLM tahu sumbernya, dan cap total 12.000 karakter
+mencakup penanda tersebut. Lampiran yang gagal diunduh/parse dicatat lalu
+berikutnya tetap dicoba. Tiga perilaku ini diuji tanpa request IDX.
 
 **Pelajaran:** setiap klien HTTP baru ke `idx.co.id` wajib `curl_cffi`. Sudah
 dicatat di `requirements.txt`.
@@ -443,8 +448,8 @@ berikutnya dapat menambah retry dan reprocess lewat seam yang teruji.
 
 ## Urutan kerja yang disarankan
 
-1. **Operasional 5 -- pemilihan lampiran + anggaran karakter.** Menaikkan
-   kualitas triage, bukan keandalan.
+1. **Operasional 5 -- pilih lampiran berdasarkan nama/ukuran.** Pembacaan
+   multi-lampiran sudah ada; heuristik memilih dokumen paling material belum.
 2. **D6 + operasional 8, 9 -- bersih-bersih.** Putuskan nasib
    `WebhookNotifier`, lalu hapus atau arsipkan script root yang usang.
 3. **Operasional 6 -- rate limit Telegram.** Penting bila triage atau retry
