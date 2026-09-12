@@ -1,7 +1,11 @@
 # Bottleneck & Utang Teknis
 
-Catatan hal-hal yang diketahui belum beres per 11 Sep 2026, setelah pipeline
-terbukti jalan end-to-end (IDX -> dedupe -> LangGraph -> Telegram).
+Catatan hal-hal yang diketahui belum beres. Ditulis 11 Sep 2026 setelah
+pipeline terbukti jalan end-to-end (IDX -> dedupe -> LangGraph -> Telegram),
+diperbarui 13 Sep 2026.
+
+Item yang sudah selesai ditandai **[SELESAI]** dan dipertahankan sebagai
+catatan: alasan perbaikannya kerap masih relevan untuk keputusan berikutnya.
 
 Dua bagian: **masalah operasional** (perilaku saat berjalan) dan **review
 desain** (bentuk kode). Urutan dalam tiap bagian: dampak tertinggi di atas.
@@ -47,7 +51,7 @@ memprosesnya ulang, dengan batas percobaan.
 
 ---
 
-## 3. Rate limit IDX belum dihormati
+## 3. Rate limit IDX belum dihormati **[SELESAI 13 Sep]**
 
 **Berkas:** `app/main.py` (scheduler), `.env` (`IDX_POLL_SECONDS`)
 
@@ -59,6 +63,9 @@ duplikat. Beban ke IDX besar, manfaatnya nol.
 503 yang muncul di log berkorelasi dengan interval rapat ini.
 
 **Perbaikan:** kembalikan ke 180 detik. Pengumuman IDX tidak sedetik-genting.
+
+`IDX_POLL_SECONDS=180` sejak 13 Sep. Masalah 1 (retry) tetap terbuka dan lebih
+penting: interval longgar mengurangi frekuensi 503, tidak menghilangkannya.
 
 ---
 
@@ -82,7 +89,7 @@ tidak membanjiri 9router maupun Telegram.
 
 ---
 
-## 5. Hanya lampiran pertama yang dibaca
+## 5. Hanya lampiran pertama yang dibaca *(sebagian selesai)*
 
 **Berkas:** `app/documents.py` (`extract_primary_pdf`)
 
@@ -98,6 +105,27 @@ Terlihat di test pertama: ringkasan berisi "Emiten: tidak tercantum",
 
 **Perbaikan:** pilih lampiran berdasarkan nama/ukuran, atau gabungkan beberapa
 lampiran dengan anggaran karakter.
+
+### 5a. Lampiran selalu gagal diunduh **[SELESAI 13 Sep]**
+
+Akar yang lebih dalam, tidak terdeteksi saat dokumen ini ditulis: `documents.py`
+memakai `requests`, sehingga **semua** unduhan lampiran ditolak Cloudflare
+dengan 403. Bukan sebagian teks yang hilang -- seluruhnya. Setiap penilaian
+triage dibuat dari judul saja.
+
+Diperbaiki dengan `curl_cffi` `impersonate="chrome"`, sama seperti `IDXClient`.
+Probe: `requests` 403 `text/html` vs `curl_cffi` 200 `application/pdf` pada tiga
+URL. Setelahnya 6/6 lampiran terbaca (2.015-12.000 karakter).
+
+Sebaran skor triage tidak berubah, tetapi dasarnya berubah: alasan untuk KDTN
+berpindah dari "tanpa data pihak, jumlah" menjadi "menjual 2,3 juta saham (0,19
+poin persentase)".
+
+Sisa yang belum: pemilihan lampiran dan `MAX_DOCUMENT_CHARS` (bagian utama di
+atas). Satu dokumen sudah menyentuh cap 12.000 karakter.
+
+**Pelajaran:** setiap klien HTTP baru ke `idx.co.id` wajib `curl_cffi`. Sudah
+dicatat di `requirements.txt`.
 
 ---
 
@@ -115,7 +143,7 @@ jeda antar-pesan.
 
 ---
 
-## 7. Filter masih menerima semua berita
+## 7. Filter masih menerima semua berita **[SELESAI 13 Sep]**
 
 **Berkas:** `app/config.py`, `.env` (`IDX_ISSUERS`, `IDX_KEYWORDS`)
 
@@ -125,6 +153,18 @@ panggilan LLM.
 
 Rencana berikutnya: node triage berbasis LLM yang menilai materialitas
 (bukan sekadar cocok kata kunci), dengan ambang skor. Dibahas lalu ditunda.
+
+Node `triage` terpasang 13 Sep. Menilai 1-5 terhadap `AGENT_PROFILE`, berhenti
+di bawah `AGENT_MIN_IMPORTANCE` (default 3) sebelum biaya peringkasan. Kalibrasi
+atas 12 disclosure nyata: sebaran `{1: 9, 2: 2, 3: 1}`, 1 dari 12 terkirim.
+
+Catatan implementasi: endpoint 9router menerima permintaan `json_schema` tetapi
+tetap membalas prosa, sehingga `method="function_calling"` wajib. `json_mode`
+juga gagal.
+
+`IDX_ISSUERS` dan `IDX_KEYWORDS` sengaja dibiarkan kosong -- triage menggantikan
+perannya. Konsekuensinya: mematikan `AGENT_LLM_TRIAGE` kini membuat **semua**
+pengumuman lolos ke Telegram.
 
 ---
 
@@ -145,12 +185,17 @@ dan kolom konfigurasi yang tidak dipakai.
 Script referensi asli dari pengguna. Sudah digantikan `app/idx_client.py`.
 Tidak diimpor siapa pun.
 
+Catatan 13 Sep: masih ada. Menjalankannya saat server hidup memicu 503 karena
+menembak API IDX bersamaan dengan poller.
+
 ---
 
 ## Hal yang sudah aman (operasional)
 
 - Dedupe atomik lewat `INSERT OR IGNORE` + primary key `Id2`.
-- 403 Cloudflare teratasi dengan `curl_cffi` `impersonate="chrome"`.
+- 403 Cloudflare teratasi dengan `curl_cffi` `impersonate="chrome"`, pada API
+  maupun unduhan lampiran.
+- Triage gagal berarti berita tetap lolos (fail-open), bukan hilang diam-diam.
 - Kegagalan `build_graph()` tidak mematikan aplikasi (mode webhook-only).
 - Kegagalan ekstraksi PDF tidak memblokir notifikasi (`text = ""`).
 - Isi PDF diperlakukan sebagai data tidak tepercaya di system prompt.
@@ -189,7 +234,7 @@ satu module yang tidak bisa diuji sama sekali.
 
 ---
 
-## D1. `app/main.py` tidak punya seam
+## D1. `app/main.py` tidak punya seam **[SELESAI 13 Sep]**
 
 **Berkas:** `app/main.py:20-52`
 
@@ -218,9 +263,18 @@ channel, pemetaan status), tetapi paling sulit disentuh.
 `process(disclosure) -> str`. `main.py` menyusut menjadi adapter HTTP +
 scheduler.
 
+Terpasang di `app/pipeline.py`. `Pipeline` menerima `repository`, graph, dan
+webhook notifier lewat konstruktor; HTTP endpoint dan poller di `main.py`
+memanggil `pipeline.process()`. Lima cabang diuji lewat `tests/test_pipeline.py`
+tanpa IDX, 9router, atau Telegram: baseline/duplikat, filter, triage, sukses,
+dan error agen.
+
+Saat menambahkan retry IDX atau proses ulang `failed`, tes dapat menyuntikkan
+adapter palsu tanpa menyentuh state modul atau database produksi.
+
 ---
 
-## D2. Seam LLM berada di dalam graph, bukan di sekelilingnya
+## D2. Seam LLM berada di dalam graph, bukan di sekelilingnya **[SELESAI]**
 
 **Berkas:** `app/graph.py:26-32`
 
@@ -233,9 +287,14 @@ untuk produksi, fake untuk tes).
 
 **Perbaikan:** `build_graph(settings, model=None)`, default membuat `ChatOpenAI`.
 
+Terpasang, beserta seam `notifier` dengan alasan yang sama: menguji graph tanpa
+suntikan pernah benar-benar mengirim pesan uji ke Telegram pengguna. Keduanya
+terbukti dipakai saat kalibrasi triage -- 12 disclosure dinilai tanpa satu pun
+notifikasi terkirim.
+
 ---
 
-## D3. Kontrak error `extract_primary_pdf` bocor (bug aktif)
+## D3. Kontrak error `extract_primary_pdf` bocor **[SELESAI]**
 
 **Berkas:** `app/graph.py:46-51`, `app/documents.py`
 
@@ -262,6 +321,14 @@ diam-diam melempar exception dari dua library berbeda.
 
 **Perbaikan:** tangani di dalam `extract_primary_pdf`, kembalikan `""`. Satu
 tempat, bukan sebanyak jumlah caller.
+
+Terpasang: unduh+parse dipindah ke `_download_and_parse`, semua exception
+ditangkap di pemanggilnya. Kontrak kini eksplisit di docstring: *tidak pernah
+melempar*.
+
+Manfaatnya langsung terbukti: migrasi `requests` -> `curl_cffi` (5a) hanya
+menyentuh `_download_and_parse`. `graph.py` tidak berubah sama sekali, meski
+kelas exception yang dilempar ikut berganti library.
 
 ---
 
@@ -344,14 +411,25 @@ penuh. Ini **depth semu**.
 
 ## Prioritas desain
 
-1. **D3** -- perbaiki tangkapan `PdfReadError`. Bug aktif, satu baris,
-   kehilangan data nyata.
-2. **D2** -- suntikkan `model` ke `build_graph`. Membuka pengujian graph tanpa
-   LLM hidup.
-3. **D1** -- ekstrak `Pipeline` dari `main.py`. Membuka pengujian logika paling
-   berharga.
+1. ~~**D3** -- perbaiki tangkapan `PdfReadError`.~~ **Selesai.**
+2. ~~**D2** -- suntikkan `model` ke `build_graph`.~~ **Selesai**, plus seam
+   `notifier`.
+3. ~~**D1** -- ekstrak `Pipeline` dari `main.py`.~~ **Selesai**, dengan lima
+   tes tanpa dependency eksternal.
 4. **D6** -- putuskan nasib `WebhookNotifier`: hapus atau pakai.
 
-Tiga pertama saling menguatkan. Setelah seam tersedia, masalah operasional di
-Bagian I (retry, pemrosesan ulang `failed`, rate limit) dapat dikerjakan dengan
-verifikasi, bukan tebakan.
+D1-D3 sudah membayar dirinya sendiri (lihat catatan di masing-masing). Langkah
+berikutnya dapat menambah retry dan reprocess lewat seam yang teruji.
+
+---
+
+## Urutan kerja yang disarankan
+
+1. **Operasional 1 -- retry 503.** Satu-satunya masalah yang menyebabkan
+   kehilangan data permanen.
+2. **Operasional 2 -- proses ulang `failed`.** Jaring pengaman untuk sisa
+   kegagalan.
+3. **Operasional 5 -- pemilihan lampiran + anggaran karakter.** Menaikkan
+   kualitas triage, bukan keandalan.
+4. **D6 + operasional 8, 9 -- bersih-bersih.** `WebhookNotifier` dan script
+   root.

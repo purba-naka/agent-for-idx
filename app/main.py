@@ -11,6 +11,7 @@ from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconne
 from .config import get_settings
 from .idx_client import IDXClient
 from .models import Disclosure, IngestPayload
+from .pipeline import Pipeline, short_error
 from .repository import Repository
 from .webhook import WebhookNotifier
 
@@ -57,12 +58,7 @@ def _build_graph():
 
 
 graph = _build_graph()
-
-
-def _short_error(error: Exception) -> str:
-    """Satu baris ringkas: 'HTTPError: HTTP Error 503' alih-alih traceback."""
-    message = str(error).strip().splitlines()[0] if str(error).strip() else "-"
-    return f"{type(error).__name__}: {message[:160]}"
+pipeline = Pipeline(settings, repository, graph, webhook_notifier)
 
 
 def _is_recent(disclosure: Disclosure) -> bool:
@@ -75,89 +71,11 @@ def _is_recent(disclosure: Disclosure) -> bool:
     return disclosure.published_at.replace(tzinfo=WIB) >= cutoff
 
 
-async def process(disclosure: Disclosure, notify: bool = True) -> str:
-    """Simpan disclosure baru (dedupe SQLite), lalu distribusikan ke channel aktif.
-
-    Urutan distribusi: (1) webhook keluar raw feed, (2) agen LLM + Telegram.
-    Return status gabungan per channel, contoh: "webhook_sent+agent_sent".
-    """
-    if not repository.insert_if_new(disclosure):
-        return "duplicate"
-    if not notify:
-        repository.mark_skipped(disclosure.id, "Baseline awal (di luar jendela lookback)")
-        return "baseline"
-
-    statuses: list[str] = []
-
-    # 1) Webhook keluar: dorong disclosure mentah ke sistem Anda sendiri
-    if webhook_notifier is None:
-        statuses.append("no_webhook")
-    elif settings.webhook_respect_filter and not disclosure.is_relevant(
-        settings.issuers, settings.keywords
-    ):
-        statuses.append("webhook_filtered")
-    elif await webhook_notifier.send(disclosure):
-        statuses.append("webhook_sent")
-    else:
-        statuses.append("webhook_failed")
-
-    # 2) Agen LLM: filter -> ringkasan -> Telegram (opsional)
-    if graph is None:
-        statuses.append("no_agent")
-    else:
-        try:
-            result = await graph.ainvoke({"disclosure": disclosure})
-            penilaian = result.get("penilaian")
-            if not result.get("relevant"):
-                repository.mark_skipped(disclosure.id, "Tidak sesuai filter kata kunci")
-                statuses.append("agent_skipped")
-            elif not result.get("telegram_message"):
-                # Lolos filter tapi dihentikan triage: simpan alasannya agar
-                # ambang skor bisa disetel berdasarkan data, bukan tebakan.
-                alasan = (
-                    f"Triage skor {penilaian.skor}/5 ({penilaian.kategori}): {penilaian.alasan}"
-                    if penilaian
-                    else "Dihentikan sebelum peringkasan"
-                )
-                repository.mark_skipped(disclosure.id, alasan)
-                statuses.append("agent_skipped")
-            else:
-                repository.mark_processed(
-                    disclosure.id,
-                    result["summary"],
-                    result["telegram_message"],
-                )
-                statuses.append("agent_sent")
-        except Exception as error:
-            repository.mark_failed(disclosure.id, str(error))
-            logger.error(
-                "agen gagal | %s | %s | %s",
-                disclosure.issuer,
-                disclosure.title[:60],
-                _short_error(error),
-            )
-            statuses.append("agent_failed")
-
-    # Status akhir di DB saat agen tidak dipakai
-    if graph is None:
-        if "webhook_failed" in statuses:
-            repository.mark_failed(disclosure.id, "Webhook keluar gagal")
-        elif "webhook_filtered" in statuses:
-            repository.mark_skipped(disclosure.id, "Tidak sesuai filter (webhook)")
-        elif "webhook_sent" in statuses:
-            repository.mark_processed(disclosure.id, "", "")
-        else:
-            repository.mark_skipped(disclosure.id, "Tidak ada channel notifikasi aktif")
-
-    status = "+".join(statuses)
-    logger.info("%s | %s | %s", status, disclosure.issuer, disclosure.title[:70])
-    return status
-
 
 async def poll_idx() -> dict[str, int]:
     """Poll IDX sekali, distribusikan item baru, kembalikan hitungan status."""
     disclosures = await IDXClient(settings).fetch_recent()
-    results = [await process(item, notify=_is_recent(item)) for item in disclosures]
+    results = [await pipeline.process(item, notify=_is_recent(item)) for item in disclosures]
     counts = {status: results.count(status) for status in set(results)}
     last_poll.update(
         at=datetime.now(WIB).isoformat(),
@@ -186,10 +104,10 @@ async def poll_idx_safe() -> None:
     try:
         await poll_idx()
     except (OSError, RuntimeError) as error:
-        logger.warning("poll gagal: %s", _short_error(error))
+        logger.warning("poll gagal: %s", short_error(error))
     except Exception as error:
         if type(error).__module__.startswith("curl_cffi"):
-            logger.warning("poll gagal: %s", _short_error(error))
+            logger.warning("poll gagal: %s", short_error(error))
         else:
             logger.exception("poll gagal (tak terduga)")
 
@@ -252,7 +170,7 @@ async def ingest_idx(
 ) -> dict[str, int]:
     """Endpoint ingest inbound: dorong disclosure dari luar ke gateway ini."""
     require_secret(x_idx_webhook_secret)
-    results = [await process(item) for item in payload.disclosures]
+    results = [await pipeline.process(item) for item in payload.disclosures]
     return {status: results.count(status) for status in set(results)}
 
 
@@ -265,7 +183,7 @@ async def ingest_idx_ws(websocket: WebSocket) -> None:
     try:
         while True:
             payload = IngestPayload.model_validate(await websocket.receive_json())
-            results = [await process(item) for item in payload.disclosures]
+            results = [await pipeline.process(item) for item in payload.disclosures]
             await websocket.send_json({status: results.count(status) for status in set(results)})
     except WebSocketDisconnect:
         return
