@@ -98,6 +98,31 @@ class PipelineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await pipeline.process(self.disclosure()), "no_webhook+agent_failed")
         self.assertEqual(self.repository.stats(), {"failed": 1})
 
+    async def test_failed_agent_is_retried_without_webhook_or_dedupe(self) -> None:
+        item = self.disclosure()
+        pipeline = Pipeline(self.settings, self.repository, GraphPalsu(RuntimeError("model mati")))
+        await pipeline.process(item)
+        pipeline.graph = GraphPalsu(
+            {"relevant": True, "summary": "ringkasan", "telegram_message": "pesan"}
+        )
+
+        self.assertEqual(await pipeline.retry_failed(), ["agent_sent"])
+        self.assertEqual(self.repository.stats(), {"sent": 1})
+        with self.repository._connect() as connection:  # noqa: SLF001 - assertion state storage
+            attempts = connection.execute("SELECT attempts FROM disclosures").fetchone()["attempts"]
+        self.assertEqual(attempts, 1)
+
+    async def test_failed_agent_stops_after_three_total_attempts(self) -> None:
+        pipeline = Pipeline(self.settings, self.repository, GraphPalsu(RuntimeError("model mati")))
+        await pipeline.process(self.disclosure())
+
+        self.assertEqual(await pipeline.retry_failed(), ["agent_failed"])
+        self.assertEqual(await pipeline.retry_failed(), ["agent_failed"])
+        self.assertEqual(await pipeline.retry_failed(), [])
+        with self.repository._connect() as connection:  # noqa: SLF001 - assertion state storage
+            attempts = connection.execute("SELECT attempts FROM disclosures").fetchone()["attempts"]
+        self.assertEqual(attempts, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

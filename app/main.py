@@ -74,8 +74,10 @@ def _is_recent(disclosure: Disclosure) -> bool:
 
 async def poll_idx() -> dict[str, int]:
     """Poll IDX sekali, distribusikan item baru, kembalikan hitungan status."""
+    retry_results = await pipeline.retry_failed()
     disclosures = await IDXClient(settings).fetch_recent()
     results = [await pipeline.process(item, notify=_is_recent(item)) for item in disclosures]
+    results.extend(f"retry_{status}" for status in retry_results)
     counts = {status: results.count(status) for status in set(results)}
     last_poll.update(
         at=datetime.now(WIB).isoformat(),

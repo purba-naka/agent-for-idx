@@ -44,7 +44,7 @@ semua empat percobaan dan seluruh jendela lookback; itu ditutup oleh item 2
 
 ---
 
-## 2. Item berstatus `failed` tidak pernah dicoba ulang
+## 2. Item berstatus `failed` tidak pernah dicoba ulang **[SELESAI 13 Sep]**
 
 **Berkas:** `app/repository.py` (`insert_if_new`), `app/main.py` (`process`)
 
@@ -58,6 +58,14 @@ ini harus hapus baris manual lewat SQLite.
 
 **Perbaikan:** job terpisah yang memindai `status IN ('failed')` dan
 memprosesnya ulang, dengan batas percobaan.
+
+Terpasang: setiap siklus poll lebih dulu mengambil maksimal 10 baris
+`failed` dengan kurang dari tiga kegagalan total. Retry hanya menjalankan
+LangGraph dan Telegram; webhook keluar tidak dikirim ulang. Kolom `attempts`
+ditambahkan dengan migrasi otomatis pada database lama.
+
+Dua perilaku diuji: item gagal bisa pulih menjadi `sent`, dan item berhenti
+setelah tiga kegagalan total.
 
 ---
 
@@ -435,9 +443,9 @@ berikutnya dapat menambah retry dan reprocess lewat seam yang teruji.
 
 ## Urutan kerja yang disarankan
 
-1. **Operasional 2 -- proses ulang `failed`.** Jaring pengaman untuk sisa
-   kegagalan poll, LLM, atau Telegram.
-2. **Operasional 5 -- pemilihan lampiran + anggaran karakter.** Menaikkan
+1. **Operasional 5 -- pemilihan lampiran + anggaran karakter.** Menaikkan
    kualitas triage, bukan keandalan.
-3. **D6 + operasional 8, 9 -- bersih-bersih.** `WebhookNotifier` dan script
-   root.
+2. **D6 + operasional 8, 9 -- bersih-bersih.** Putuskan nasib
+   `WebhookNotifier`, lalu hapus atau arsipkan script root yang usang.
+3. **Operasional 6 -- rate limit Telegram.** Penting bila triage atau retry
+   menghasilkan banyak pesan dalam satu siklus.

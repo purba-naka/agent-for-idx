@@ -9,6 +9,8 @@ from .repository import Repository
 from .webhook import WebhookNotifier
 
 logger = logging.getLogger("idx")
+MAX_RETRY_ATTEMPTS = 3
+RETRY_BATCH_SIZE = 10
 
 
 class DisclosureGraph(Protocol):
@@ -59,6 +61,20 @@ class Pipeline:
         status = "+".join(statuses)
         logger.info("%s | %s | %s", status, disclosure.issuer, disclosure.title[:70])
         return status
+
+    async def retry_failed(self) -> list[str]:
+        """Coba ulang agent untuk kegagalan lama, tanpa mengirim ulang webhook."""
+        if self.graph is None:
+            return []
+
+        statuses: list[str] = []
+        for disclosure in self.repository.failed_for_retry(MAX_RETRY_ATTEMPTS, RETRY_BATCH_SIZE):
+            result: list[str] = []
+            await self._run_agent(disclosure, result)
+            status = result[-1]
+            statuses.append(status)
+            logger.info("retry %s | %s | %s", status, disclosure.issuer, disclosure.title[:70])
+        return statuses
 
     async def _send_webhook(self, disclosure: Disclosure, statuses: list[str]) -> None:
         notifier = self.webhook_notifier

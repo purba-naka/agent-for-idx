@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 from .models import Disclosure
 
@@ -42,12 +42,21 @@ class Repository:
                     summary TEXT,
                     telegram_message TEXT,
                     error TEXT,
-                    processed_at TEXT
+                    processed_at TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_disclosures_published_at
                     ON disclosures(published_at);
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(disclosures)").fetchall()
+            }
+            if "attempts" not in columns:
+                connection.execute(
+                    "ALTER TABLE disclosures ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+                )
 
     def insert_if_new(self, disclosure: Disclosure) -> bool:
         with self._connect() as connection:
@@ -90,9 +99,39 @@ class Repository:
     def mark_failed(self, disclosure_id: str, error: str) -> None:
         with self._connect() as connection:
             connection.execute(
-                "UPDATE disclosures SET status = 'failed', error = ? WHERE id = ?",
+                "UPDATE disclosures SET status = 'failed', error = ?, attempts = attempts + 1 WHERE id = ?",
                 (error, disclosure_id),
             )
+
+    def failed_for_retry(self, max_attempts: int, limit: int) -> list[Disclosure]:
+        """Item gagal yang masih boleh diulang, diurutkan dari kegagalan terlama."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, published_at, issuer, title, category, raw_json
+                FROM disclosures
+                WHERE status = 'failed' AND attempts < ?
+                ORDER BY rowid
+                LIMIT ?
+                """,
+                (max_attempts, limit),
+            ).fetchall()
+        return [self._disclosure_from_row(row) for row in rows]
+
+    @staticmethod
+    def _disclosure_from_row(row: sqlite3.Row) -> Disclosure:
+        raw = json.loads(row["raw_json"])
+        announcement = raw.get("pengumuman", {})
+        return Disclosure(
+            id=row["id"],
+            published_at=row["published_at"],
+            issuer=row["issuer"],
+            title=row["title"],
+            category=row["category"],
+            announcement_number=announcement.get("NoPengumuman") or "",
+            attachments=raw.get("attachments") or [],
+            raw=raw,
+        )
 
     def stats(self) -> dict[str, int]:
         """Hitungan disclosure per status (untuk endpoint /stats)."""
