@@ -1,15 +1,19 @@
 # Agent Keterbukaan Informasi IDX
 
 Agen yang memantau [Keterbukaan Informasi IDX](https://www.idx.co.id/id/perusahaan-tercatat/keterbukaan-informasi),
-membaca lampiran PDF pengumuman baru, meringkasnya dengan LLM, lalu mengirim
-hasilnya ke Telegram.
+membaca lampiran PDF pengumuman baru, menilai materialitasnya terhadap profil
+minat Anda, meringkas yang lolos, lalu mengirimnya ke Telegram.
 
 Tanpa antarmuka visual. Jalankan, biarkan hidup, notifikasi datang sendiri.
 
 ```
-IDX API ──> dedupe ──> filter ──> baca PDF ──> ringkas (LLM) ──> Telegram
-            SQLite              LangGraph
+IDX API ──> dedupe ──> filter ──> baca PDF ──> triage ──> ringkas ──> Telegram
+            SQLite                            (LLM)      (LLM)
+                       └──────────── LangGraph ────────────┘
 ```
+
+Triage adalah saringan utama: tiap pengumuman dinilai 1-5, dan yang di bawah
+`AGENT_MIN_IMPORTANCE` berhenti di sana tanpa biaya peringkasan.
 
 ## Kenapa polling, bukan webhook
 
@@ -85,10 +89,18 @@ curl -X POST http://127.0.0.1:8000/trigger -H "X-IDX-Webhook-Secret: $SECRET"
 | `IDX_LOOKBACK_MINUTES` | `10` | Jendela umur pengumuman yang layak dinotifikasi |
 | `IDX_ISSUERS` | kosong | Kosong = semua emiten |
 | `IDX_KEYWORDS` | kosong | Kosong = semua topik |
+| `AGENT_PROFILE` | investor ritel | Profil minat Anda; dasar penilaian triage |
+| `AGENT_MIN_IMPORTANCE` | `3` | Ambang skor 1-5. `3` longgar, `4` ketat |
+| `AGENT_LLM_TRIAGE` | `true` | `false` = lewati triage, kembali ke filter kata kunci |
 
-Dengan kedua filter kosong, sekitar 49 pengumuman per hari akan masuk Telegram
-dan masing-masing memakai satu panggilan LLM. Isi minimal salah satunya bila
-ingin lebih sepi.
+IDX menerbitkan sekitar 49 pengumuman per hari. Dengan kedua filter kata kunci
+kosong, semuanya masuk ke triage, tetapi hanya sebagian kecil yang lolos ke
+Telegram -- kalibrasi atas 12 pengumuman nyata memberi sebaran skor
+`{1: 9, 2: 2, 3: 1}`. Naikkan `AGENT_MIN_IMPORTANCE` ke `4` bila masih ramai;
+turunkan ke `2` bila terlalu sepi.
+
+`AGENT_PROFILE` ditulis bebas dalam Bahasa Indonesia. Semakin spesifik
+(sektor, ukuran posisi, aksi korporasi yang diincar), semakin tajam triage.
 
 ## Struktur
 
@@ -96,11 +108,12 @@ ingin lebih sepi.
 |---|---|
 | `app/idx_client.py` | Klien API IDX; menembus Cloudflare via `curl_cffi` |
 | `app/repository.py` | SQLite; dedupe atomik lewat `INSERT OR IGNORE` |
-| `app/documents.py` | Unduh + ekstrak teks lampiran PDF |
-| `app/graph.py` | LangGraph: filter -> baca dokumen -> ringkas -> kirim |
+| `app/documents.py` | Unduh + ekstrak teks lampiran PDF (maks 3, total 12.000 karakter) |
+| `app/graph.py` | LangGraph: filter -> baca dokumen -> triage -> ringkas -> kirim |
+| `app/pipeline.py` | Dedupe, status DB, reprocess `failed`, webhook keluar |
 | `app/telegram.py` | Pengiriman pesan Telegram |
 | `app/webhook.py` | Webhook keluar opsional (generic/Discord/Slack) |
-| `app/main.py` | FastAPI + APScheduler |
+| `app/main.py` | FastAPI + APScheduler (adapter, tanpa logika bisnis) |
 | `app/config.py` | Konfigurasi lewat `.env` |
 
 Catatan teknis yang tidak jelas dari kode disimpan sebagai komentar di tempatnya
@@ -112,17 +125,33 @@ Catatan teknis yang tidak jelas dari kode disimpan sebagai komentar di tempatnya
 Dirancang agar kegagalan parsial tidak menjatuhkan keseluruhan:
 
 - Konfigurasi LLM/Telegram tidak lengkap -> agen nonaktif, aplikasi tetap jalan.
-- Lampiran PDF gagal diunduh atau dibaca -> diringkas dari metadata saja.
-- Poll IDX gagal -> dicatat satu baris, siklus berikutnya lanjut.
+- Lampiran PDF gagal diunduh atau dibaca -> dilewati, lampiran lain tetap dibaca;
+  bila semua gagal, penilaian memakai metadata saja.
+- Poll IDX membalas 429/5xx -> diulang maksimal 4x dengan backoff 1/2/4 detik dan
+  menghormati `Retry-After`. `403` tidak diulang.
+- Telegram membalas 429/5xx -> diulang 3x. `4xx` lain permanen, pengumuman
+  ditandai `failed`.
+- Pengumuman berstatus `failed` dicoba ulang maksimal 3x pada poll berikutnya
+  (maks 10 baris per siklus). Webhook keluar tidak dikirim ulang.
 
 Isi PDF diperlakukan sebagai data tidak tepercaya di system prompt, jadi
 instruksi yang disisipkan di dalam dokumen tidak dituruti.
 
+## Tes
+
+```sh
+.venv/Scripts/python.exe -m unittest discover -s tests -v
+```
+
+Seluruh tes berjalan offline -- IDX, 9router, dan Telegram semuanya dipalsukan.
+Jangan menjalankan graph tanpa menyuntik `notifier` palsu: pesan akan benar-benar
+terkirim ke Telegram.
+
 ## Batasan yang diketahui
 
-Belum ada retry saat IDX membalas 503, dan pengumuman berstatus `failed` tidak
-dicoba ulang secara otomatis. Daftar lengkap beserta review desain ada di
-[BOTTLENECKS.md](BOTTLENECKS.md).
+Pemrosesan masih berurutan satu per satu, dan belum ada jeda global untuk
+menahan burst >20 pesan per menit ke Telegram. Daftar lengkap beserta review
+desain ada di [BOTTLENECKS.md](BOTTLENECKS.md).
 
 ## Keamanan
 
