@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from datetime import datetime
@@ -21,6 +22,22 @@ class GraphPalsu:
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
+
+
+class GraphLambat(GraphPalsu):
+    """Catat berapa banyak invoke yang berjalan bersamaan."""
+
+    def __init__(self, result: dict[str, Any]) -> None:
+        super().__init__(result)
+        self.berjalan = 0
+        self.puncak = 0
+
+    async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
+        self.berjalan += 1
+        self.puncak = max(self.puncak, self.berjalan)
+        await asyncio.sleep(0)
+        self.berjalan -= 1
+        return await super().ainvoke(_input)
 
 
 class PipelineTest(unittest.IsolatedAsyncioTestCase):
@@ -122,6 +139,35 @@ class PipelineTest(unittest.IsolatedAsyncioTestCase):
         with self.repository._connect() as connection:  # noqa: SLF001 - assertion state storage
             attempts = connection.execute("SELECT attempts FROM disclosures").fetchone()["attempts"]
         self.assertEqual(attempts, 3)
+
+
+    async def test_process_many_keeps_input_order_within_concurrency_limit(self) -> None:
+        graph = GraphLambat({"relevant": True, "summary": "s", "telegram_message": "m"})
+        pipeline = Pipeline(
+            Settings(database_path=self.repository.path, agent_concurrency=2),
+            self.repository,
+            graph,
+        )
+        items = [self.disclosure(f"id-{index}") for index in range(5)]
+        self.repository.insert_if_new(items[0])
+
+        hasil = await pipeline.process_many(items)
+
+        self.assertEqual(hasil[0], "duplicate")
+        self.assertEqual(hasil[1:], ["no_webhook+agent_sent"] * 4)
+        self.assertLessEqual(graph.puncak, 2)
+
+    async def test_process_many_notify_predicate_selects_baseline_items(self) -> None:
+        pipeline = Pipeline(
+            self.settings,
+            self.repository,
+            GraphPalsu({"relevant": True, "summary": "s", "telegram_message": "m"}),
+        )
+        items = [self.disclosure("baru"), self.disclosure("lama")]
+
+        hasil = await pipeline.process_many(items, notify=lambda item: item.id == "baru")
+
+        self.assertEqual(hasil, ["no_webhook+agent_sent", "baseline"])
 
 
 if __name__ == "__main__":

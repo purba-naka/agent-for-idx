@@ -92,6 +92,7 @@ curl -X POST http://127.0.0.1:8000/trigger -H "X-IDX-Webhook-Secret: $SECRET"
 | `AGENT_PROFILE` | investor ritel | Profil minat Anda; dasar penilaian triage |
 | `AGENT_MIN_IMPORTANCE` | `3` | Ambang skor 1-5. `3` longgar, `4` ketat |
 | `AGENT_LLM_TRIAGE` | `true` | `false` = lewati triage, kembali ke filter kata kunci |
+| `AGENT_CONCURRENCY` | `3` | Disclosure yang diproses bersamaan dalam satu poll |
 
 IDX menerbitkan sekitar 49 pengumuman per hari. Dengan kedua filter kata kunci
 kosong, semuanya masuk ke triage, tetapi hanya sebagian kecil yang lolos ke
@@ -149,9 +150,9 @@ terkirim ke Telegram.
 
 ## Batasan yang diketahui
 
-Pemrosesan masih berurutan satu per satu, dan belum ada jeda global untuk
-menahan burst >20 pesan per menit ke Telegram. Daftar lengkap beserta review
-desain ada di [BOTTLENECKS.md](BOTTLENECKS.md).
+Belum ada jeda global untuk menahan burst >20 pesan per menit ke Telegram --
+saat ini `AGENT_CONCURRENCY` yang menahannya secara tidak langsung. Daftar
+lengkap beserta review desain ada di [BOTTLENECKS.md](BOTTLENECKS.md).
 
 ## Keamanan
 

@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     agent_min_importance: int = 3
     # Matikan untuk kembali ke filter kata kunci saja (hemat satu panggilan LLM).
     agent_llm_triage: bool = True
+    # Disclosure yang diproses bersamaan dalam satu poll. Naikkan bila banyak
+    # pengumuman rilis serentak; setiap slot memakai satu unduhan PDF + LLM,
+    # jadi angka besar membebani 9router dan mendekati limit ~20 pesan/menit
+    # Telegram.
+    agent_concurrency: int = 3
 
     # --- Secret endpoint inbound: /webhook/idx, /trigger, /stats, /ws/idx ---
     idx_webhook_secret: str = ""

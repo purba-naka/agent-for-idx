@@ -76,7 +76,7 @@ async def poll_idx() -> dict[str, int]:
     """Poll IDX sekali, distribusikan item baru, kembalikan hitungan status."""
     retry_results = await pipeline.retry_failed()
     disclosures = await IDXClient(settings).fetch_recent()
-    results = [await pipeline.process(item, notify=_is_recent(item)) for item in disclosures]
+    results = await pipeline.process_many(disclosures, notify=_is_recent)
     results.extend(f"retry_{status}" for status in retry_results)
     counts = {status: results.count(status) for status in set(results)}
     last_poll.update(
@@ -172,7 +172,7 @@ async def ingest_idx(
 ) -> dict[str, int]:
     """Endpoint ingest inbound: dorong disclosure dari luar ke gateway ini."""
     require_secret(x_idx_webhook_secret)
-    results = [await pipeline.process(item) for item in payload.disclosures]
+    results = await pipeline.process_many(payload.disclosures)
     return {status: results.count(status) for status in set(results)}
 
 
@@ -185,7 +185,7 @@ async def ingest_idx_ws(websocket: WebSocket) -> None:
     try:
         while True:
             payload = IngestPayload.model_validate(await websocket.receive_json())
-            results = [await pipeline.process(item) for item in payload.disclosures]
+            results = await pipeline.process_many(payload.disclosures)
             await websocket.send_json({status: results.count(status) for status in set(results)})
     except WebSocketDisconnect:
         return

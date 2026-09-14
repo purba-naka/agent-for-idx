@@ -87,7 +87,7 @@ penting: interval longgar mengurangi frekuensi 503, tidak menghilangkannya.
 
 ---
 
-## 4. Pemrosesan serial memperlambat poll
+## 4. Pemrosesan serial memperlambat poll **[SELESAI 14 Sep]**
 
 **Berkas:** `app/main.py` (`poll_idx`)
 
@@ -104,6 +104,18 @@ jadi telat.
 
 **Perbaikan:** `asyncio.gather` dengan `Semaphore` (misal 3 bersamaan) agar
 tidak membanjiri 9router maupun Telegram.
+
+Terpasang 14 Sep sebagai `Pipeline.process_many(disclosures, notify=...)`.
+`Semaphore(settings.agent_concurrency)`, default 3. `notify` menerima `bool`
+atau predikat per-item, sehingga `main.py` cukup meneruskan `_is_recent` alih-
+alih menyusun daftar sendiri. Urutan hasil tetap mengikuti urutan masukan
+(`asyncio.gather` menjaga posisi), jadi penghitungan status tidak berubah.
+Ketiga pemanggil -- poll terjadwal, `POST /webhook/idx`, dan `WS /ws/idx` --
+memakai jalur yang sama.
+
+Dedupe tetap aman di bawah konkurensi: `insert_if_new` bersandar pada
+`INSERT OR IGNORE` dengan `id` sebagai primary key, atomik di level SQLite,
+bukan pada pembacaan-lalu-tulis di Python.
 
 ---
 
@@ -173,6 +185,11 @@ Belum ada jeda global antar-pesan. Saat ini risiko limit hanya muncul bila
 lebih dari ~20 berita lolos triage dalam satu menit; prioritas rendah selama
 ambang triage tetap 3.
 
+Catatan 14 Sep: `AGENT_CONCURRENCY` (default 3) kini menjadi pembatas de facto.
+Tiga pesan bersamaan masih jauh di bawah ~30 pesan/detik, dan retry `429`
+sudah menangani sisanya. Jeda global baru layak dipasang bila
+`AGENT_CONCURRENCY` dinaikkan jauh atau ambang triage diturunkan ke 2.
+
 ---
 
 ## 7. Filter masih menerima semua berita **[SELESAI 13 Sep]**
@@ -212,13 +229,17 @@ dan kolom konfigurasi yang tidak dipakai.
 
 ---
 
-## 9. `idx_keterbukaan_informasi.py` tertinggal di root
+## 9. `idx_keterbukaan_informasi.py` tertinggal di root **[SELESAI 14 Sep]**
 
 Script referensi asli dari pengguna. Sudah digantikan `app/idx_client.py`.
 Tidak diimpor siapa pun.
 
 Catatan 13 Sep: masih ada. Menjalankannya saat server hidup memicu 503 karena
 menembak API IDX bersamaan dengan poller.
+
+Dihapus 14 Sep. Riwayat git tetap menyimpannya bila suatu saat dibutuhkan;
+pengetahuan yang masih relevan (bentuk params, `PAGE_SIZE` besar alih-alih
+paging `indexFrom`) sudah pindah ke komentar di `app/idx_client.py`.
 
 ---
 

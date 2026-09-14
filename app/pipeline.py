@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Callable, Iterable
 from typing import Any, Protocol
 
 from .config import Settings
@@ -28,7 +30,8 @@ def short_error(error: Exception) -> str:
 class Pipeline:
     """Distribusikan satu disclosure baru ke channel aktif.
 
-    Interface: ``process(disclosure, notify=True) -> status``. Dedupe, status
+    Interface: ``process(disclosure, notify=True) -> status`` untuk satu item,
+    ``process_many(disclosures, notify=...)`` untuk sekumpulan. Dedupe, status
     SQLite, webhook, dan graph berada di sini supaya HTTP/scheduler maupun tes
     memakai perilaku yang sama.
     """
@@ -61,6 +64,27 @@ class Pipeline:
         status = "+".join(statuses)
         logger.info("%s | %s | %s", status, disclosure.issuer, disclosure.title[:70])
         return status
+
+    async def process_many(
+        self,
+        disclosures: Iterable[Disclosure],
+        notify: Callable[[Disclosure], bool] | bool = True,
+    ) -> list[str]:
+        """Proses sekumpulan disclosure, maksimal `agent_concurrency` bersamaan.
+
+        Berurutan tiap item bisa memakan unduhan PDF (timeout 60 detik) plus dua
+        panggilan LLM, sehingga satu siklus poll dapat melebihi intervalnya
+        sendiri. Semaphore menjaga agar percepatan ini tidak membanjiri 9router
+        maupun Telegram. Urutan hasil mengikuti urutan masukan.
+        """
+        pilih = notify if callable(notify) else (lambda _: notify)
+        batas = asyncio.Semaphore(max(1, self.settings.agent_concurrency))
+
+        async def jalankan(disclosure: Disclosure) -> str:
+            async with batas:
+                return await self.process(disclosure, notify=pilih(disclosure))
+
+        return list(await asyncio.gather(*(jalankan(item) for item in disclosures)))
 
     async def retry_failed(self) -> list[str]:
         """Coba ulang agent untuk kegagalan lama, tanpa mengirim ulang webhook."""
