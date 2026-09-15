@@ -54,6 +54,18 @@ class Settings(BaseSettings):
     # Telegram.
     agent_concurrency: int = 3
 
+    # --- NeoBDM: sumber aliran institusi untuk node akumulasi ---
+    # API internal tanpa dokumentasi resmi; kosongkan untuk menonaktifkan node.
+    neobdm_base_url: str = "https://neobdm.tech"
+    neobdm_username: str = ""
+    neobdm_password: str = ""
+    # Kategori aliran: bandar, nonretail, foreign, sultan, institution, zombie.
+    # Kategori berbeda bisa memberi kesimpulan berlawanan untuk emiten yang
+    # sama, jadi ganti hanya bila Anda paham konsekuensinya.
+    neobdm_kategori: Literal[
+        "bandar", "nonretail", "foreign", "sultan", "institution", "zombie"
+    ] = "foreign"
+
     # --- Secret endpoint inbound: /webhook/idx, /trigger, /stats, /ws/idx ---
     idx_webhook_secret: str = ""
 
@@ -73,6 +85,10 @@ class Settings(BaseSettings):
     @property
     def agent_enabled(self) -> bool:
         return bool(self.openai_api_key and self.telegram_bot_token and self.telegram_chat_id)
+
+    @property
+    def neobdm_enabled(self) -> bool:
+        return bool(self.neobdm_username and self.neobdm_password)
 
 
 @lru_cache
