@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from .akumulasi import BarisBroker
 from .models import Disclosure
 
 
@@ -47,6 +48,27 @@ class Repository:
                 );
                 CREATE INDEX IF NOT EXISTS idx_disclosures_published_at
                     ON disclosures(published_at);
+
+                -- Aliran dana harian per emiten. `tanggal` adalah last-update
+                -- NeoBDM (tanggal data), bukan tanggal job berjalan: keduanya
+                -- berbeda bila job telat atau bursa libur.
+                -- `kategori` ikut kunci karena foreign dan institution bisa
+                -- memberi kesimpulan berlawanan untuk emiten yang sama.
+                CREATE TABLE IF NOT EXISTS snapshot_aliran (
+                    tanggal TEXT NOT NULL,
+                    kategori TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    periode TEXT NOT NULL,
+                    netval REAL NOT NULL,
+                    PRIMARY KEY (tanggal, kategori, symbol, periode)
+                ) WITHOUT ROWID;
+
+                CREATE TABLE IF NOT EXISTS snapshot_harga (
+                    tanggal TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    close REAL NOT NULL,
+                    PRIMARY KEY (tanggal, symbol)
+                ) WITHOUT ROWID;
                 """
             )
             columns = {
@@ -132,6 +154,101 @@ class Repository:
             attachments=raw.get("attachments") or [],
             raw=raw,
         )
+
+    # --- Snapshot aliran dana harian ---
+
+    def simpan_snapshot(
+        self,
+        tanggal: str,
+        kategori: str,
+        tabel: dict[str, list[BarisBroker]],
+        harga: dict[str, float] | None = None,
+    ) -> int:
+        """Simpan satu hari aliran; idempoten agar job boleh diulang.
+
+        Harga ikut disimpan meski `analisis()` belum memakainya: data pasar
+        kemarin tidak bisa ditarik ulang besok, dan penilaian rekomendasi
+        nantinya perlu tahu harga bergerak ke mana.
+        """
+        baris = [
+            (tanggal, kategori, b.symbol, periode, b.netval)
+            for periode, isi in tabel.items()
+            for b in isi
+        ]
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO snapshot_aliran
+                    (tanggal, kategori, symbol, periode, netval)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                baris,
+            )
+            if harga:
+                connection.executemany(
+                    "INSERT OR REPLACE INTO snapshot_harga (tanggal, symbol, close) VALUES (?, ?, ?)",
+                    [(tanggal, simbol, nilai) for simbol, nilai in harga.items()],
+                )
+        return len(baris)
+
+    def tanggal_snapshot(self, kategori: str, limit: int = 2) -> list[str]:
+        """Tanggal snapshot terbaru lebih dulu; pemindai lompatan butuh dua."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT tanggal FROM snapshot_aliran
+                WHERE kategori = ? ORDER BY tanggal DESC LIMIT ?
+                """,
+                (kategori, limit),
+            ).fetchall()
+        return [row["tanggal"] for row in rows]
+
+    def snapshot(
+        self, kategori: str, tanggal: str | None = None
+    ) -> tuple[str, dict[str, list[BarisBroker]]] | None:
+        """Satu hari aliran dalam bentuk yang diterima `akumulasi.analisis()`.
+
+        Tanpa `tanggal` berarti yang terbaru. None bila belum ada data sama
+        sekali -- pemanggil harus melanjutkan tanpa blok akumulasi, bukan gagal.
+        """
+        if tanggal is None:
+            tersedia = self.tanggal_snapshot(kategori, limit=1)
+            if not tersedia:
+                return None
+            tanggal = tersedia[0]
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT symbol, periode, netval FROM snapshot_aliran
+                WHERE kategori = ? AND tanggal = ?
+                """,
+                (kategori, tanggal),
+            ).fetchall()
+        if not rows:
+            return None
+        tabel: dict[str, list[BarisBroker]] = {}
+        for row in rows:
+            # Nol di sini berarti "tidak diketahui": NeoBDM hanya memberi aliran
+            # bersih, jadi `rasio` sengaja bernilai None alih-alih dikarang.
+            tabel.setdefault(row["periode"], []).append(
+                BarisBroker(
+                    symbol=row["symbol"],
+                    netval=row["netval"],
+                    bval=0.0,
+                    sval=0.0,
+                    bavg=0.0,
+                    savg=0.0,
+                )
+            )
+        return tanggal, tabel
+
+    def harga_snapshot(self, tanggal: str, symbol: str) -> float | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT close FROM snapshot_harga WHERE tanggal = ? AND symbol = ?",
+                (tanggal, symbol.upper()),
+            ).fetchone()
+        return row["close"] if row else None
 
     def stats(self) -> dict[str, int]:
         """Hitungan disclosure per status (untuk endpoint /stats)."""

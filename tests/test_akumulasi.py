@@ -133,9 +133,16 @@ class RingkasTest(unittest.TestCase):
         self.assertIn("+40.0 M", teks)
         self.assertIn("+300.0 M", teks)
 
-    def test_rasio_tak_terdefinisi_ditulis_strip(self) -> None:
+    def test_rasio_tak_terdefinisi_dihilangkan(self) -> None:
         data = {"5d": [BarisBroker("TARGET", 40.0, 40.0, 0.0, 1000.0, 0.0)]}
-        self.assertIn("bval/sval -", analisis("TARGET", data).ringkas())
+        self.assertNotIn("bval/sval", analisis("TARGET", data).ringkas())
+
+    def test_sumber_tanpa_rincian_tidak_menulis_nol(self) -> None:
+        """NeoBDM hanya memberi aliran bersih; 'bavg 0' akan terbaca nol sungguhan."""
+        data = {"5d": [BarisBroker("TARGET", 40.0, 0.0, 0.0, 0.0, 0.0)]}
+        teks = analisis("TARGET", data).ringkas()
+        self.assertIn("+40.0 M", teks)
+        self.assertNotIn("bavg", teks)
 
 
 if __name__ == "__main__":

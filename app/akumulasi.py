@@ -87,10 +87,17 @@ class Akumulasi:
         """
         baris = [f"Lintasan: {self.lintasan} ({PENJELASAN[self.lintasan]})"]
         for jejak in self.jejak:
-            rasio = f"{jejak.rasio:.1f}x" if jejak.rasio is not None else "-"
+            # Sumber yang hanya memberi aliran bersih (NeoBDM) tidak punya
+            # bavg/rasio. Menulis "bavg 0" akan terbaca sebagai nol sungguhan,
+            # jadi kolom yang tidak diketahui dihilangkan, bukan dinolkan.
+            rinci = [f"netval {jejak.netval:+.1f} M"]
+            if jejak.bavg:
+                rinci.append(f"bavg {jejak.bavg:.0f}")
+            if jejak.rasio is not None:
+                rinci.append(f"bval/sval {jejak.rasio:.1f}x")
             baris.append(
                 f"  {jejak.periode:>4}: #{jejak.peringkat}/{jejak.dari} | "
-                f"netval {jejak.netval:+.1f} M | bavg {jejak.bavg:.0f} | bval/sval {rasio}"
+                + " | ".join(rinci)
             )
         baris.extend(f"  catatan: {catatan}" for catatan in self.catatan)
         return "\n".join(baris)

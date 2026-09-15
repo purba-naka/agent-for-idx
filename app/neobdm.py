@@ -122,6 +122,30 @@ class NeoBDMClient:
             raise NeoBDMError("market summary kosong untuk semua periode")
         return tabel
 
+    async def tanggal_data(self) -> str:
+        """Tanggal data terakhir menurut server (`YYYY-MM-DD`).
+
+        NeoBDM hanya end-of-day: saat bursa masih buka, ini menjawab tanggal
+        kemarin. Job harian memakainya untuk memutuskan apakah perlu menarik
+        sama sekali, alih-alih menebak dari jam dinding.
+        """
+        sesi = await self._sesi_siap()
+        isi = await self._get_json(sesi, f"{self.base}/api/market-summary/last-update")
+        tanggal = isi.get("data")
+        if isinstance(tanggal, dict):  # bentuk envelope pernah berubah
+            tanggal = tanggal.get("last_update") or tanggal.get("date")
+        if not tanggal:
+            raise NeoBDMError("last-update tanpa tanggal")
+        return str(tanggal)[:10]
+
+    async def harga_semua(self) -> dict[str, float]:
+        """Harga penutupan seluruh papan dari tarikan yang sama."""
+        return {
+            str(item["symbol"]).upper(): float(item["close"])
+            for item in await self._semua_baris()
+            if item.get("symbol") and item.get("close")
+        }
+
     async def harga_terakhir(self, kode: str) -> float | None:
         """Harga penutupan terakhir dari tabel yang sama; None bila tak ada."""
         for item in await self._semua_baris():

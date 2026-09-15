@@ -9,6 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 
 from .config import get_settings
+from .snapshot import tarik_snapshot
 from .idx_client import IDXClient
 from .models import Disclosure, IngestPayload
 from .pipeline import Pipeline, short_error
@@ -126,6 +127,22 @@ async def lifespan(_: FastAPI):
         max_instances=1,
         coalesce=True,
     )
+    if settings.neobdm_enabled:
+        # Dua kali: 17.30 menangkap hari bursa normal, 20.30 menjaring hari
+        # ketika NeoBDM terlambat memperbarui. Tarikan kedua dilewati sendiri
+        # bila tanggalnya sudah tersimpan.
+        scheduler.add_job(
+            tarik_snapshot,
+            "cron",
+            hour="17,20",
+            minute=30,
+            timezone=WIB,
+            args=[settings, repository],
+            id="neobdm-snapshot",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
     scheduler.start()
     await poll_idx_safe()
     yield
@@ -163,6 +180,16 @@ async def trigger(x_idx_webhook_secret: str | None = Header(default=None)) -> di
     """Jalankan poll IDX sekarang tanpa menunggu jadwal."""
     require_secret(x_idx_webhook_secret)
     return await poll_idx()
+
+
+@app.post("/snapshot")
+async def snapshot(
+    paksa: bool = False, x_idx_webhook_secret: str | None = Header(default=None)
+) -> dict[str, str | None]:
+    """Tarik snapshot NeoBDM sekarang; `paksa=true` menimpa tanggal yang sama."""
+    require_secret(x_idx_webhook_secret)
+    tanggal = await tarik_snapshot(settings, repository, paksa=paksa)
+    return {"tanggal": tanggal, "status": "tersimpan" if tanggal else "dilewati"}
 
 
 @app.post("/webhook/idx")
