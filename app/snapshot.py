@@ -21,6 +21,55 @@ from .repository import Repository
 logger = logging.getLogger("idx")
 
 
+def nilai_rekomendasi_matang(settings: Settings, repository: Repository) -> int:
+    """Nilai tesis setelah tiga snapshot bursa berikutnya tersedia.
+
+    NeoBDM tidak menyediakan net flow 1d/2d historis. Karena itu bukti yang sah
+    adalah apakah rolling netval 5d masih positif pada H+3, bukan angka harian
+    yang direkonstruksi secara palsu.
+    """
+    tanggal = repository.tanggal_snapshot(settings.neobdm_kategori, limit=100)
+    if len(tanggal) < 4:
+        return 0
+    urut = sorted(tanggal)
+    dinilai = 0
+    for item in repository.rekomendasi_belum_dinilai(urut[-3]):
+        try:
+            indeks = urut.index(item["tanggal_snapshot"])
+        except ValueError:
+            continue
+        if indeks + 3 >= len(urut):
+            continue
+        tanggal_uji = urut[indeks + 3]
+        snapshot = repository.snapshot(settings.neobdm_kategori, tanggal_uji)
+        if snapshot is None:
+            continue
+        _, tabel = snapshot
+        baris = next(
+            (
+                row
+                for row in tabel.get("5d", [])
+                if row.symbol.upper() == item["issuer"]
+            ),
+            None,
+        )
+        netval = baris.netval if baris else 0.0
+        lintasan = item["lintasan"]
+        if lintasan == "distribusi":
+            hasil = "bertahan" if netval <= 0 else "terbantah"
+        elif lintasan.startswith("akumulasi_"):
+            hasil = "bertahan" if netval > 0 else "terbantah"
+        else:
+            hasil = "tidak_dapat_dinilai"
+        repository.nilai_rekomendasi(
+            item["disclosure_id"],
+            hasil,
+            f"H+3 {tanggal_uji}: netval 5d {netval:+.1f} M",
+        )
+        dinilai += 1
+    return dinilai
+
+
 async def tarik_snapshot(
     settings: Settings, repository: Repository, paksa: bool = False
 ) -> str | None:
@@ -49,8 +98,14 @@ async def tarik_snapshot(
         tabel = await klien.tabel_akumulasi()
         harga = await klien.harga_semua()
         jumlah = repository.simpan_snapshot(tanggal, kategori, tabel, harga)
+        dinilai = nilai_rekomendasi_matang(settings, repository)
         logger.info(
-            "snapshot %s (%s): %s baris, %s emiten", tanggal, kategori, jumlah, len(harga)
+            "snapshot %s (%s): %s baris, %s emiten, %s rekomendasi dinilai",
+            tanggal,
+            kategori,
+            jumlah,
+            len(harga),
+            dinilai,
         )
         return tanggal
     except NeoBDMError as error:

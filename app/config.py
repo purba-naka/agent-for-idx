@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # Skor materialitas 1-5 dari triage. Di bawah ambang ini, pengumuman tidak
     # diringkas dan tidak dikirim. 3 = longgar, 4 = ketat.
     agent_min_importance: int = 3
+    # Ambang kedua, lebih tinggi: di atas ini pengumuman ditemani analisis aliran
+    # dana institusi dan rekomendasi terukur. Analisis ini hanya sepadan untuk
+    # berita yang memang bisa menggerakkan harga.
+    agent_akumulasi_min_skor: int = 4
     # Matikan untuk kembali ke filter kata kunci saja (hemat satu panggilan LLM).
     agent_llm_triage: bool = True
     # Disclosure yang diproses bersamaan dalam satu poll. Naikkan bila banyak

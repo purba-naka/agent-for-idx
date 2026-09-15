@@ -69,6 +69,27 @@ class Repository:
                     close REAL NOT NULL,
                     PRIMARY KEY (tanggal, symbol)
                 ) WITHOUT ROWID;
+
+                -- Rekomendasi disimpan supaya bisa dibuktikan salah di
+                -- kemudian hari. Tanpa tabel ini agent hanya bercerita:
+                -- tidak ada catatan berapa kali tesisnya meleset.
+                -- `hasil` NULL berarti belum jatuh tempo penilaian.
+                CREATE TABLE IF NOT EXISTS rekomendasi (
+                    disclosure_id TEXT PRIMARY KEY,
+                    issuer TEXT NOT NULL,
+                    tanggal_snapshot TEXT NOT NULL,
+                    kategori TEXT NOT NULL,
+                    lintasan TEXT NOT NULL,
+                    netval_5d REAL NOT NULL,
+                    tesis TEXT NOT NULL,
+                    dasar TEXT NOT NULL,
+                    pembantah TEXT NOT NULL,
+                    keyakinan TEXT NOT NULL,
+                    horizon_hari INTEGER NOT NULL,
+                    dibuat_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    hasil TEXT,
+                    catatan_hasil TEXT
+                );
                 """
             )
             columns = {
@@ -203,6 +224,24 @@ class Repository:
             ).fetchall()
         return [row["tanggal"] for row in rows]
 
+    def snapshot_pada_atau_sebelum(
+        self, kategori: str, tanggal_batas: str
+    ) -> tuple[str, dict[str, list[BarisBroker]]] | None:
+        """Snapshot terakhir yang sudah tersedia saat disclosure terbit.
+
+        Retry disclosure lama tidak boleh memakai snapshot masa depan karena itu
+        akan mengubah analisis pre-positioning menjadi hindsight.
+        """
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT MAX(tanggal) AS tanggal FROM snapshot_aliran
+                WHERE kategori = ? AND tanggal <= ?
+                """,
+                (kategori, tanggal_batas),
+            ).fetchone()
+        return self.snapshot(kategori, row["tanggal"]) if row and row["tanggal"] else None
+
     def snapshot(
         self, kategori: str, tanggal: str | None = None
     ) -> tuple[str, dict[str, list[BarisBroker]]] | None:
@@ -249,6 +288,93 @@ class Repository:
                 (tanggal, symbol.upper()),
             ).fetchone()
         return row["close"] if row else None
+
+    # --- Rekomendasi dan penilaiannya ---
+
+    def simpan_rekomendasi(
+        self,
+        disclosure_id: str,
+        issuer: str,
+        tanggal_snapshot: str,
+        kategori: str,
+        lintasan: str,
+        netval_5d: float,
+        tesis: str,
+        dasar: str,
+        pembantah: str,
+        keyakinan: str,
+        horizon_hari: int,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO rekomendasi
+                    (disclosure_id, issuer, tanggal_snapshot, kategori, lintasan,
+                     netval_5d, tesis, dasar, pembantah, keyakinan, horizon_hari)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(disclosure_id) DO UPDATE SET
+                    issuer = excluded.issuer,
+                    tanggal_snapshot = excluded.tanggal_snapshot,
+                    kategori = excluded.kategori,
+                    lintasan = excluded.lintasan,
+                    netval_5d = excluded.netval_5d,
+                    tesis = excluded.tesis,
+                    dasar = excluded.dasar,
+                    pembantah = excluded.pembantah,
+                    keyakinan = excluded.keyakinan,
+                    horizon_hari = excluded.horizon_hari
+                """,
+                (
+                    disclosure_id,
+                    issuer.upper(),
+                    tanggal_snapshot,
+                    kategori,
+                    lintasan,
+                    netval_5d,
+                    tesis,
+                    dasar,
+                    pembantah,
+                    keyakinan,
+                    horizon_hari,
+                ),
+            )
+
+    def rekomendasi_belum_dinilai(self, sebelum: str) -> list[sqlite3.Row]:
+        """Rekomendasi yang snapshot-nya lebih tua dari `sebelum` dan belum dinilai."""
+        with self._connect() as connection:
+            return connection.execute(
+                """
+                SELECT * FROM rekomendasi
+                WHERE hasil IS NULL AND tanggal_snapshot < ?
+                ORDER BY tanggal_snapshot
+                """,
+                (sebelum,),
+            ).fetchall()
+
+    def nilai_rekomendasi(self, disclosure_id: str, hasil: str, catatan: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE rekomendasi SET hasil = ?, catatan_hasil = ? WHERE disclosure_id = ?",
+                (hasil, catatan, disclosure_id),
+            )
+
+    def rapor_lintasan(self) -> dict[str, tuple[int, int]]:
+        """Per lintasan: (jumlah bertahan, jumlah dinilai).
+
+        Inilah satu-satunya alat ukur apakah tesis agent lebih baik daripada
+        tebakan; dipakai manusia, bukan diumpankan balik ke prompt.
+        """
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT lintasan,
+                       SUM(hasil = 'bertahan') AS benar,
+                       COUNT(*) AS total
+                FROM rekomendasi WHERE hasil IS NOT NULL
+                GROUP BY lintasan
+                """
+            ).fetchall()
+        return {row["lintasan"]: (row["benar"] or 0, row["total"]) for row in rows}
 
     def stats(self) -> dict[str, int]:
         """Hitungan disclosure per status (untuk endpoint /stats)."""

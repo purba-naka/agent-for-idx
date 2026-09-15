@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from app.akumulasi import BarisBroker
+from app.config import Settings
 from app.repository import Repository
-from app.snapshot import tarik_snapshot
+from app.snapshot import nilai_rekomendasi_matang, tarik_snapshot
 
 
 def tabel(**periode: float) -> dict[str, list[BarisBroker]]:
@@ -78,6 +79,33 @@ class RepositorySnapshotTest(unittest.TestCase):
         hasil = self.repo.snapshot("foreign")
         assert hasil is not None
         self.assertIsNone(hasil[1]["5d"][0].rasio)
+
+    def test_snapshot_pada_atau_sebelum_tidak_melihat_masa_depan(self) -> None:
+        self.repo.simpan_snapshot("2026-09-12", "foreign", tabel(**{"5d": 10.0}))
+        self.repo.simpan_snapshot("2026-09-16", "foreign", tabel(**{"5d": -10.0}))
+        hasil = self.repo.snapshot_pada_atau_sebelum("foreign", "2026-09-15")
+        assert hasil is not None
+        self.assertEqual(hasil[0], "2026-09-12")
+        self.assertEqual(hasil[1]["5d"][0].netval, 10.0)
+
+    def test_rekomendasi_dinilai_setelah_tiga_snapshot_bursa(self) -> None:
+        for tanggal, nilai in (
+            ("2026-09-14", 100.0),
+            ("2026-09-15", 80.0),
+            ("2026-09-16", 50.0),
+            ("2026-09-17", 20.0),
+        ):
+            self.repo.simpan_snapshot(tanggal, "foreign", tabel(**{"5d": nilai}))
+        self.repo.simpan_rekomendasi(
+            "d-1", "AMMN", "2026-09-14", "foreign",
+            "akumulasi_berkelanjutan", 100.0, "pantau", "netval +100.0 M",
+            "net sell", "sedang", 3,
+        )
+
+        settings = Settings(neobdm_kategori="foreign")
+        self.assertEqual(nilai_rekomendasi_matang(settings, self.repo), 1)
+        self.assertEqual(self.repo.rapor_lintasan(), {"akumulasi_berkelanjutan": (1, 1)})
+        self.assertEqual(nilai_rekomendasi_matang(settings, self.repo), 0)  # idempoten
 
 
 class AturanPalsu:

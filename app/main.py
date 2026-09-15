@@ -52,7 +52,7 @@ def _build_graph():
     try:
         from .graph import build_graph
 
-        return build_graph(settings)
+        return build_graph(settings, repository)
     except Exception as error:
         logger.warning("Agen LLM dinonaktifkan (build graph gagal: %s)", error)
         return None
