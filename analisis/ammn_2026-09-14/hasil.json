@@ -1,0 +1,59 @@
+{
+  "ticker": "AMMN.JK",
+  "tanggal_broker": "2026-09-14",
+  "tanggal_harga_terakhir": "2026-09-15",
+  "broker": {
+    "1d": {
+      "netval_miliar": 208.7,
+      "bval_miliar": 351.5,
+      "sval_miliar": 142.8,
+      "bavg": 4980.5,
+      "savg": 4970.1,
+      "rasio_beli_jual": 2.4615
+    },
+    "2d": {
+      "netval_miliar": 223.8,
+      "bval_miliar": 442.8,
+      "sval_miliar": 219.0,
+      "bavg": 4942.7,
+      "savg": 4919.2,
+      "rasio_beli_jual": 2.0219
+    },
+    "5d": {
+      "netval_miliar": 309.7,
+      "bval_miliar": 834.3,
+      "sval_miliar": 524.6,
+      "bavg": 4836.0,
+      "savg": 4815.0,
+      "rasio_beli_jual": 1.5904
+    },
+    "20d": {
+      "netval_miliar": 396.9,
+      "bval_miliar": 1780.6,
+      "sval_miliar": 1383.7,
+      "bavg": 4601.6,
+      "savg": 4535.8,
+      "rasio_beli_jual": 1.2868
+    }
+  },
+  "harga": {
+    "close": 5100.0,
+    "return_hari_peristiwa_persen": 4.94,
+    "return_setelah_peristiwa_persen": 0.0,
+    "return_sejak_13_agustus_persen": 20.85,
+    "volume_hari_peristiwa": 169146700,
+    "volume_setelah_peristiwa": 34910300,
+    "rasio_volume_peristiwa_vs_rata_sebelumnya": 2.71,
+    "rasio_volume_setelah_vs_peristiwa": 0.21,
+    "low_setelah_peristiwa": 4970.0,
+    "low_vs_bavg_5d_persen": 2.77
+  },
+  "konfirmasi_setelah_peristiwa": {
+    "harga_bertahan_di_atas_bavg_5d": true,
+    "volume_kembali_normal": true,
+    "net_buy_1d_2d_tetap_positif": null,
+    "status": "parsial; data broker setelah 14 September belum tersedia"
+  },
+  "lintasan": "akumulasi_berkelanjutan",
+  "fakta_akumulasi": "Lintasan: akumulasi_berkelanjutan (institusi menyerap sejak jendela panjang dan masih membeli)\n    5d: #1/1 | netval +309.7 M | bavg 4836 | bval/sval 1.6x\n   20d: #1/1 | netval +396.9 M | bavg 4602 | bval/sval 1.3x\n  catatan: bavg 4836 vs harga 5100 (+5.5%) -- pembeli sudah untung, berita bisa jadi jalan keluar"
+}

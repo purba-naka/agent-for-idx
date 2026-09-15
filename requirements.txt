@@ -12,3 +12,6 @@ uvicorn[standard]==0.34.2
 # Wajib untuk semua request ke idx.co.id (API dan unduhan lampiran):
 # impersonate="chrome" meniru TLS fingerprint browser agar lolos Cloudflare.
 curl_cffi==0.16.3
+
+# Analisis harga pasar sekunder untuk laporan akumulasi satu kali.
+yfinance==1.7.0
